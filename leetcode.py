@@ -5,9 +5,9 @@ import urllib.request
 import json
 from retrying import retry
 import configparser
+from html.parser import HTMLParser
 
 COOKIE = ""
-
 
 def httpGet(url):
     req = urllib.request.Request(url)
@@ -18,6 +18,10 @@ def httpPostJson(url, data):
     req = urllib.request.Request(url, data=json.dumps(data).encode())
     req.add_header("content-type", "application/json")
     req.add_header("Cookie", COOKIE)
+    req.add_header("Host", "leetcode.com")
+    req.add_header("Origin", "https://leetcode.com")
+    req.add_header("Referer", "https://leetcode.com/problems/") # need problem name ?
+    req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 Safari/537.36")
     #req.add_header("X-CSRFToken", CSRF_TOKEN)
     req.add_header("X-Requested-With", "XMLHttpRequest")
     return urllib.request.urlopen(req).read().decode()
@@ -34,10 +38,12 @@ def getProblem(name):
     tag = '<meta name="description" content="'
     index = html.index(tag) + len(tag)
     desc = html[index:html.index('"', index)]
+    hp = HTMLParser()
+    desc = hp.unescape(desc)
 
     tag = 'codeDefinition:'
     index = html.index(tag) + len(tag)
-    defaultCodes = json.loads( html[index:html.index(',]', index)].replace("'", "\"") + "]")
+    defaultCodes = json.loads( html[index:html.index('enableTestMode', index)].strip().replace("'", "\"")[:-3]+"]")
 
     tag = 'sampleTestCase:'
     index = html.index(tag) + len(tag)
@@ -91,7 +97,7 @@ def runLocal():
 def getSubmissionResult(interpret_id):
     interpret_url = 'https://leetcode.com/submissions/detail/%s/check/' % interpret_id
     result = json.loads( httpGet(interpret_url) )
-    if result['state'] == 'STARTED':
+    if result['state'] in ['STARTED', 'PENDING']:
         raise Exception
     return result
 
@@ -108,12 +114,26 @@ def runRemoteTest():
     submission = json.loads( httpPostJson(url, data) )
     myResult = getSubmissionResult(submission['interpret_id'])
     expectedResult = getSubmissionResult(submission['interpret_expected_id'])
-    print(myResult)
-    print(expectedResult)
+    print("Your Answer", myResult)
+    print("Standard Answer", expectedResult)
+    if 'compile_error' in myResult:
+        print("Compile Error")
+        print( myResult['compile_error'] )
+        return
+    if 'runtime_error' in myResult:
+        print("RunTime Error")
+        print( myResult['runtime_error'] )
+        return
+
     if myResult['code_answer'] == expectedResult['code_answer']:
         status = "Accepted"
     else:
         status = "Wrong Answer"
+
+    if myResult['code_output'] != []:
+        print("STDOUT")
+        for line in myResult['code_output']:
+            print( line )
     print(status)
 
 def submit():
@@ -121,7 +141,13 @@ def submit():
         category, name, question_id = f.read().split(" ")
     with open("./algo.cpp", "r") as f:
         code = f.read()
+    with open("testcase", "r") as f:
+        testcase = f.read()
     url = "https://leetcode.com/problems/%s/submit/" % name
+    data = {"data_input": testcase, "judge_type":"large", "lang":"cpp", "question_id":question_id, "test_mode":False, "typed_code":code}
+    submission = json.loads( httpPostJson(url, data) )
+    myResult = getSubmissionResult(submission['submission_id'])
+    print( myResult )
 
 
 def requireArgv(num):
